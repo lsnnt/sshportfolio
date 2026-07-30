@@ -1,0 +1,13 @@
+[package]
+name = "sshportfolio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+russh = "0.62.4"
+ratatui = "0.30.2"
+tokio = {version = "1.53.1", features = ["full"]}
+anyhow = "1.0.104"
+rand = "0.10.2"
+ssh-key = "0.7.0-rc.11"
+crossterm = "0.29.0"

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use ratatui::text::{Line, Span};
 use russh::keys::ssh_key::PublicKey;
@@ -13,7 +13,6 @@ use russh::{Channel, ChannelId, Pty};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-type SshTerminal = Terminal<CrosstermBackend<TerminalHandle>>;
 
 use tui_big_text::{BigText, PixelSize};
 
@@ -21,6 +20,7 @@ use tui_big_text::{BigText, PixelSize};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Home,
+    About,
     Projects,
     Timeline,
     Blog,
@@ -37,10 +37,11 @@ pub struct ClientState<B: Backend> {
 /// Call this from your existing key-byte handler for a connection.
 pub fn handle_key<B: Backend>(state: &mut ClientState<B>, key: char) {
     state.page = match key {
-        'a' | 'A' => Page::Home,
+        'a' | 'A' => Page::About,
         't' | 'T' => Page::Timeline,
         'b' | 'B' => Page::Blog,
         'c' | 'C' => Page::Contact,
+        'h' | 'H' => Page::Home, // back to the hero landing screen
         _ => return, // unrecognized key, leave the page as-is
     };
 }
@@ -114,6 +115,7 @@ fn draw_nav(frame: &mut Frame, area: Rect, page: Page) {
 fn draw_body(frame: &mut Frame, area: Rect, page: Page) {
     match page {
         Page::Home => draw_home(frame, area),
+        Page::About => draw_about(frame, area),
         Page::Projects => draw_placeholder(frame, area, "PROJECTS", "cat projects.log"),
         Page::Timeline => draw_placeholder(frame, area, "TIMELINE", "cat timeline.log"),
         Page::Blog => draw_placeholder(frame, area, "BLOG", "ls ~/blog"),
@@ -178,6 +180,99 @@ fn line_green(text: &'static str) -> Line<'static> {
     Line::from(Span::styled(text, Style::new().fg(Color::Green)))
 }
 
+const LANGUAGES: &[&str] = &["Go", "Rust", "Python", "C++ / Java"];
+const INFRA: &[&str] = &["Linux Kernel", "Docker", "AWS S3", "Wireguard / Bird"];
+const SECURITY: &[&str] = &["Reverse Engineering", "PCAPDroid", "Burp Suite", "Frida"];
+
+fn draw_about(frame: &mut Frame, area: Rect) {
+    let card = Block::default()
+        .title(" root@nnt: ~ ")
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(Color::DarkGray));
+    let inner = card.inner(area);
+    frame.render_widget(card, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // $ cat about.txt
+            Constraint::Length(2), // > SYSTEM_INFO
+            Constraint::Length(1), // divider
+            Constraint::Length(5), // bio paragraph
+            Constraint::Length(1), // spacer
+            Constraint::Min(0),    // skill columns
+        ])
+        .split(inner);
+
+    let cmd = Paragraph::new(Line::from(Span::styled(
+        "$ cat about.txt",
+        Style::new().fg(Color::Gray),
+    )));
+    frame.render_widget(cmd, rows[0]);
+
+    let heading = Paragraph::new(Line::from(vec![
+        Span::styled("> ", Style::new().fg(Color::Green)),
+        Span::styled(
+            "SYSTEM_INFO",
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    frame.render_widget(heading, rows[1]);
+
+    let divider = Paragraph::new(Line::from(Span::styled(
+        "─".repeat(rows[2].width as usize),
+        Style::new().fg(Color::DarkGray),
+    )));
+    frame.render_widget(divider, rows[2]);
+
+    let bio = Paragraph::new(
+        "B.Tech CSE student @ VIT Vellore (Class of 2028). I build systems from the metal \
+         up — compiling Linux kernels, wiring BGP, and shipping backend services in Go and \
+         Rust. I run most of my own infrastructure, reverse-engineer consumer apps to \
+         understand how they tick, and document the journey in writing. Off-keyboard: \
+         fountain pens and cooking.",
+    )
+        .style(Style::new().fg(Color::White))
+        .wrap(Wrap { trim: true });
+    frame.render_widget(bio, rows[3]);
+
+    draw_skill_columns(frame, rows[5]);
+}
+
+fn draw_skill_columns(frame: &mut Frame, area: Rect) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+        ])
+        .split(area);
+
+    draw_skill_column(frame, cols[0], "LANGUAGES", LANGUAGES);
+    draw_skill_column(frame, cols[1], "INFRA", INFRA);
+    draw_skill_column(frame, cols[2], "SECURITY", SECURITY);
+}
+
+fn draw_skill_column(frame: &mut Frame, area: Rect, label: &str, items: &[&str]) {
+    let mut lines = vec![Line::from(vec![
+        Span::styled("// ", Style::new().fg(Color::Green)),
+        Span::styled(
+            label.to_string(),
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ),
+    ])];
+    lines.push(Line::from(""));
+    for item in items {
+        lines.push(Line::from(Span::styled(
+            item.to_string(),
+            Style::new().fg(Color::Gray),
+        )));
+    }
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
 fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, hint: &str) {
     let block = Block::default()
         .title(format!(" {title} "))
@@ -213,7 +308,9 @@ fn draw_footer(frame: &mut Frame, area: Rect, page: Page) {
     };
 
     let line = Line::from(vec![
-        hint("about", 'a', page == Page::Home),
+        hint("home", 'h', page == Page::Home),
+        Span::raw(" "),
+        hint("about", 'a', page == Page::About),
         Span::raw(" "),
         hint("timeline", 't', page == Page::Timeline),
         Span::raw(" "),
@@ -227,6 +324,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, page: Page) {
         .alignment(Alignment::Center);
     frame.render_widget(footer, area);
 }
+
 
 struct TerminalHandle {
     sender: UnboundedSender<Vec<u8>>,

@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::{Terminal, TerminalOptions, Viewport};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use ratatui::text::{Line, Span};
 use russh::keys::ssh_key::PublicKey;
 use russh::server::*;
@@ -15,7 +15,218 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 type SshTerminal = Terminal<CrosstermBackend<TerminalHandle>>;
 
+use tui_big_text::{BigText, PixelSize};
 
+/// Which section of the site a client is currently viewing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    Home,
+    Projects,
+    Timeline,
+    Blog,
+    Contact,
+}
+
+/// Whatever you already store per SSH connection — extend it with `page`.
+/// Swap the key type (`usize` below) for whatever you key `clients` on.
+pub struct ClientState<B: Backend> {
+    pub terminal: Terminal<B>,
+    pub page: Page,
+}
+
+/// Call this from your existing key-byte handler for a connection.
+pub fn handle_key<B: Backend>(state: &mut ClientState<B>, key: char) {
+    state.page = match key {
+        'a' | 'A' => Page::Home,
+        't' | 'T' => Page::Timeline,
+        'b' | 'B' => Page::Blog,
+        'c' | 'C' => Page::Contact,
+        _ => return, // unrecognized key, leave the page as-is
+    };
+}
+
+/// This is your posted loop, filled in — redraw every connected client
+/// using its own current page.
+pub async fn redraw_all<B: Backend>(clients: &mut HashMap<usize, ClientState<B>>) {
+    for (_, client) in clients.iter_mut() {
+        let page = client.page;
+        let _ = client.terminal.draw(|frame| {
+            draw_ui(frame, page);
+        });
+    }
+}
+
+fn draw_ui(frame: &mut Frame, page: Page) {
+    let area = frame.area();
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // top nav bar
+            Constraint::Min(0),    // body
+            Constraint::Length(3), // keybinding footer
+        ])
+        .split(area);
+
+    draw_nav(frame, chunks[0], page);
+    draw_body(frame, chunks[1], page);
+    draw_footer(frame, chunks[2], page);
+}
+
+// ---------- nav bar ----------
+
+fn nav_span(label: &'static str, active: bool) -> Span<'static> {
+    let style = if active {
+        Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(Color::White)
+    };
+    Span::styled(label, style)
+}
+
+fn draw_nav(frame: &mut Frame, area: Rect, page: Page) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+
+    let left = Paragraph::new(Line::from(vec![
+        Span::styled("[ root@nnt ]", Style::new().fg(Color::Green)),
+        Span::styled(": /#", Style::new().fg(Color::White)),
+    ]));
+    frame.render_widget(left, cols[0]);
+
+    let right = Paragraph::new(Line::from(vec![
+        nav_span("~/projects", page == Page::Projects),
+        Span::raw("   "),
+        nav_span("~/timeline", page == Page::Timeline),
+        Span::raw("   "),
+        nav_span("~/blog", page == Page::Blog),
+        Span::raw("   "),
+        nav_span("contact", page == Page::Contact),
+    ]))
+        .alignment(Alignment::Right);
+    frame.render_widget(right, cols[1]);
+}
+
+// ---------- body ----------
+
+fn draw_body(frame: &mut Frame, area: Rect, page: Page) {
+    match page {
+        Page::Home => draw_home(frame, area),
+        Page::Projects => draw_placeholder(frame, area, "PROJECTS", "cat projects.log"),
+        Page::Timeline => draw_placeholder(frame, area, "TIMELINE", "cat timeline.log"),
+        Page::Blog => draw_placeholder(frame, area, "BLOG", "ls ~/blog"),
+        Page::Contact => draw_placeholder(frame, area, "CONTACT", "./contact.sh"),
+    }
+}
+
+fn draw_home(frame: &mut Frame, area: Rect) {
+    let card = Block::default()
+        .title(" root@nnt: ~ ")
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(Color::DarkGray));
+    let inner = card.inner(area);
+    frame.render_widget(card, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2), // $ ./init_profile.sh
+            Constraint::Length(8), // big title
+            Constraint::Min(0),    // info lines
+        ])
+        .split(inner);
+
+    let cmd = Paragraph::new(Line::from(Span::styled(
+        "$ ./init_profile.sh",
+        Style::new().fg(Color::Gray),
+    )));
+    frame.render_widget(cmd, rows[0]);
+
+    let big_text = BigText::builder()
+        .pixel_size(PixelSize::Quadrant)
+        .style(Style::new().fg(Color::White))
+        .lines(vec!["NITYANAND_THAKUR".into()])
+        .build();
+    // Note: some tui-big-text versions return a Result from build() —
+    // if yours does, add `.unwrap()` (or `?` in a function returning Result).
+    frame.render_widget(big_text, rows[1]);
+
+    let info = Paragraph::new(vec![
+        line_green("> Loading profile..."),
+        line_green("> User: nnt"),
+        line_green("> Role: SRE / Infra / Security-leaning Systems Engineer"),
+        line_green("> Education: B.Tech CSE @ VIT Vellore '28"),
+        line_green(
+            "> Focus: Building systems from the metal up — kernels, BGP, and backend services.",
+        ),
+        Line::from(vec![
+            Span::styled("> Status: ", Style::new().fg(Color::Green)),
+            Span::styled(
+                "[ ONLINE ]",
+                Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Available for work", Style::new().fg(Color::Green)),
+        ]),
+    ])
+        .wrap(Wrap { trim: true });
+    frame.render_widget(info, rows[2]);
+}
+
+fn line_green(text: &'static str) -> Line<'static> {
+    Line::from(Span::styled(text, Style::new().fg(Color::Green)))
+}
+
+fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, hint: &str) {
+    let block = Block::default()
+        .title(format!(" {title} "))
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let body = Paragraph::new(vec![
+        Line::from(Span::styled(format!("$ {hint}"), Style::new().fg(Color::Gray))),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("> {title} content goes here."),
+            Style::new().fg(Color::Green),
+        )),
+    ]);
+    frame.render_widget(body, inner);
+}
+
+// ---------- footer ----------
+
+fn draw_footer(frame: &mut Frame, area: Rect, page: Page) {
+    let hint = |label: &'static str, key: char, active: bool| {
+        let style = if active {
+            Style::new()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(Color::White)
+        };
+        Span::styled(format!(" [{key}] {label} "), style)
+    };
+
+    let line = Line::from(vec![
+        hint("about", 'a', page == Page::Home),
+        Span::raw(" "),
+        hint("timeline", 't', page == Page::Timeline),
+        Span::raw(" "),
+        hint("blog", 'b', page == Page::Blog),
+        Span::raw(" "),
+        hint("contact", 'c', page == Page::Contact),
+    ]);
+
+    let footer = Paragraph::new(line)
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center);
+    frame.render_widget(footer, area);
+}
 
 struct TerminalHandle {
     sender: UnboundedSender<Vec<u8>>,
@@ -64,7 +275,7 @@ impl std::io::Write for TerminalHandle {
 
 #[derive(Clone)]
 struct AppServer {
-    clients: Arc<Mutex<HashMap<usize, SshTerminal>>>,
+    clients: Arc<Mutex<HashMap<usize, ClientState<CrosstermBackend<TerminalHandle>>>>>,
     id: usize,
 }
 
@@ -84,12 +295,7 @@ impl AppServer {
                 interval.tick().await;
 
                 let mut clients = clients.lock().await;
-
-                for (_, terminal) in clients.iter_mut() {
-                    let _ = terminal.draw(|frame| {
-                        
-                    });
-                }
+                redraw_all(&mut clients).await;
             }
         });
 
@@ -144,8 +350,13 @@ impl Handler for AppServer {
         let terminal = Terminal::with_options(backend, options)?;
 
         let mut clients = self.clients.lock().await;
-        clients.insert(self.id, terminal);
-
+        clients.insert(
+            self.id,
+            ClientState {
+                terminal,
+                page: Page::Home,
+            },
+        );
         reply.accept().await;
         Ok(())
     }
@@ -157,13 +368,25 @@ impl Handler for AppServer {
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         match data {
-            // Pressing 'q' closes the connection.
             b"q" => {
                 self.clients.lock().await.remove(&self.id);
                 session.close(channel)?;
             }
-            // Pressing 'c' resets the counter for the app.
-            // Only the client with the id sees the counter reset.
+
+            &[key] => {
+                let mut clients = self.clients.lock().await;
+
+                if let Some(client) = clients.get_mut(&self.id) {
+                    handle_key(client, key as char);
+
+                    // Optional: redraw immediately
+                    let page = client.page;
+                    let _ = client.terminal.draw(|frame| {
+                        draw_ui(frame, page);
+                    });
+                }
+            }
+
             _ => {}
         }
 
@@ -195,7 +418,7 @@ impl Handler for AppServer {
 
         let mut clients = self.clients.lock().await;
         let terminal = clients.get_mut(&self.id).unwrap();
-        terminal.resize(rect)?;
+        terminal.terminal.resize(rect)?;
 
         session.channel_success(channel)?;
 
@@ -221,7 +444,7 @@ impl Handler for AppServer {
 
         let mut clients = self.clients.lock().await;
         let terminal = clients.get_mut(&self.id).unwrap();
-        terminal.resize(rect)?;
+        terminal.terminal.resize(rect)?;
 
         Ok(())
     }

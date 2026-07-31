@@ -1,22 +1,36 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+mod libs;
+mod models;
 
+use std::collections::HashMap;
+use std::fmt::format;
+use std::sync::{Arc, LazyLock};
+use once_cell::unsync::Lazy;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal, TerminalOptions, Viewport};
 use ratatui::text::{Line, Span};
+use reqwest::Client;
 use russh::keys::ssh_key::PublicKey;
 use russh::server::*;
 use russh::{Channel, ChannelId, Pty};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-
 use tui_big_text::{BigText, PixelSize};
+use crate::libs::lcapi::lcapi;
+use crate::libs::rating::rating;
 
 /// Which section of the site a client is currently viewing.
+///
+
+pub static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
+    Client::builder()
+        .user_agent("lsnnt")
+        .build()
+        .expect("Failed to build reqwest client")
+});
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     Home,
@@ -39,6 +53,7 @@ pub fn handle_key<B: Backend>(state: &mut ClientState<B>, key: char) {
     state.page = match key {
         'a' | 'A' => Page::About,
         't' | 'T' => Page::Timeline,
+        'P' | 'p' => Page::Projects,
         'b' | 'B' => Page::Blog,
         'c' | 'C' => Page::Contact,
         'h' | 'H' => Page::Home, // back to the hero landing screen
@@ -116,8 +131,8 @@ fn draw_body(frame: &mut Frame, area: Rect, page: Page) {
     match page {
         Page::Home => draw_home(frame, area),
         Page::About => draw_about(frame, area),
-        Page::Projects => draw_placeholder(frame, area, "PROJECTS", "cat projects.log"),
-        Page::Timeline => draw_placeholder(frame, area, "TIMELINE", "cat timeline.log"),
+        Page::Projects => draw_projects(frame, area),
+        Page::Timeline => draw_timeline(frame, area),
         Page::Blog => draw_placeholder(frame, area, "BLOG", "ls ~/blog"),
         Page::Contact => draw_placeholder(frame, area, "CONTACT", "./contact.sh"),
     }
@@ -291,7 +306,178 @@ fn draw_placeholder(frame: &mut Frame, area: Rect, title: &str, hint: &str) {
     ]);
     frame.render_widget(body, inner);
 }
+struct Project<'a> {
+    name: &'a str,
+    description: &'a str,
+    stars: u32,
+    language: &'a str,
+    language_color: Color,
+}
+fn draw_projects(frame: &mut Frame, area: Rect) {
+    let projects = [
+        Project {
+            name: "SSH Portfolio",
+            description: "A portfolio accessible over SSH using Russh + Ratatui.",
+            stars: 152,
+            language: "Rust",
+            language_color: Color::Magenta,
+        },
+        Project {
+            name: "Spotify-banner-for-github",
+            description: "An http server that returns a svg image of the last 20 songs listened on spotify (no client id,secret needed) (no spotify premium needed) ",
+            stars: 8,
+            language: "MicroPython",
+            language_color: Color::Green,
+        },
+        Project {
+            name: "MineStress",
+            description: "Minecraft server stress-testing tool with configurable bots.",
+            stars: 41,
+            language: "Rust",
+            language_color: Color::Magenta,
+        },
+    ];
+    let block = Block::default()
+        .title("Projects")
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(Color::DarkGray));
 
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(Span::styled(
+        "$ cat projects.log",
+        Style::new().fg(Color::Gray),
+    )));
+    lines.push(Line::default());
+
+    for project in projects {
+        lines.push(Line::from(vec![
+            Span::styled("▶ ", Style::new().fg(Color::Yellow)),
+            Span::styled(project.name, Style::new().fg(Color::Cyan).bold()),
+        ]));
+
+        lines.push(Line::from(Span::styled(
+            format!("  {}", project.description),
+            Style::new().fg(Color::White),
+        )));
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("  ★ {}  ", project.stars),
+                Style::new().fg(Color::Yellow),
+            ),
+            Span::styled(
+                project.language,
+                Style::new().fg(project.language_color),
+            ),
+        ]));
+
+        lines.push(Line::default());
+    }
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+
+struct TimelineItem<'a> {
+    date: &'a str,
+    head: &'a str,
+    title: &'a str,
+    desc: String,
+}
+fn draw_timeline(frame: &mut Frame, area: Rect) {
+    let (cr,mr) = rating(&HTTP_CLIENT).unwrap_or((0,0));
+    let items = vec![
+        TimelineItem {
+            date: "Jul 2024",
+            head: "HEAD~5",
+            title: "Leetcode Journey Begins",
+            desc: format!("Registered on Leetcode. Solved {} problems.",lcapi(&HTTP_CLIENT).await.unwrap_or(0)),
+        },
+        TimelineItem {
+            date: "Oct 2024",
+            head: "HEAD~4",
+            title: "Codeforces Journey Begins",
+            desc: format!("Current rating {}. Max rating {}.",cr,mr),
+        },
+        TimelineItem {
+            date: "Nov 2025",
+            head: "HEAD~3",
+            title: "Maithili TTS Models",
+            desc: "Failed attempt to fine-tuned MMS-TTS for Maithili.".to_string(),
+        },
+        TimelineItem {
+            date: "Jan 2026",
+            head: "HEAD~2",
+            title: "Self-Hosting & Blogging",
+            desc: "Launched blog.lsnnt.dev. Published custom DDns Script in Rust and Vande Bharat train data extraction write-ups.".to_string()
+        },
+        TimelineItem {
+            date: "Jun 2026",
+            head: "HEAD~1",
+            title: "Systems Engineering Deep Dive",
+            desc: "Compiled Linux kernel + BusyBox webserver. Updated ntranscrybe (Rust) for sub-second macOS captions.".to_string()
+        }
+    ];
+
+    let block = Block::default()
+        .title(" git log --oneline ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(Span::styled(
+        "> COMMIT_HISTORY",
+        Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    lines.push(Line::default());
+
+    for item in items {
+        lines.push(Line::from(vec![
+            Span::styled("● ", Style::default().fg(Color::Green)),
+            Span::styled(
+                format!("[{}] {}", item.date, item.head),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::raw("│ "),
+            Span::styled(
+                item.title,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::styled("│ ", Style::default().fg(Color::Green)),
+            Span::styled(item.desc, Style::default().fg(Color::DarkGray)),
+        ]));
+
+        lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(Color::Green)),
+        ]));
+
+        lines.push(Line::default());
+    }
+
+    let paragraph = Paragraph::new(lines);
+
+    frame.render_widget(paragraph, inner);
+
+}
 // ---------- footer ----------
 
 fn draw_footer(frame: &mut Frame, area: Rect, page: Page) {
@@ -309,6 +495,8 @@ fn draw_footer(frame: &mut Frame, area: Rect, page: Page) {
 
     let line = Line::from(vec![
         hint("home", 'h', page == Page::Home),
+        Span::raw(" "),
+        hint("projects", 'p', page == Page::Projects),
         Span::raw(" "),
         hint("about", 'a', page == Page::About),
         Span::raw(" "),
@@ -425,7 +613,9 @@ impl Server for AppServer {
 
 impl Handler for AppServer {
     type Error = anyhow::Error;
-
+    async fn auth_password(&mut self, _user: &str, _password: &str) -> Result<Auth, Self::Error> {
+        Ok(Auth::Accept)
+    }
     async fn auth_publickey(&mut self, _: &str, _: &PublicKey) -> Result<Auth, Self::Error> {
         Ok(Auth::Accept)
     }

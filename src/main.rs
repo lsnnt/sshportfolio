@@ -1,5 +1,3 @@
-mod libs;
-mod models;
 
 use std::collections::HashMap;
 use std::fmt::format;
@@ -19,17 +17,12 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use tui_big_text::{BigText, PixelSize};
-use crate::libs::lcapi::lcapi;
-use crate::libs::rating::rating;
-
 /// Which section of the site a client is currently viewing.
 ///
 
 pub static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
-        .user_agent("lsnnt")
-        .build()
-        .expect("Failed to build reqwest client")
+        .build().unwrap()
 });
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Page {
@@ -389,19 +382,18 @@ struct TimelineItem<'a> {
     desc: String,
 }
 fn draw_timeline(frame: &mut Frame, area: Rect) {
-    let (cr,mr) = rating(&HTTP_CLIENT).unwrap_or((0,0));
     let items = vec![
         TimelineItem {
             date: "Jul 2024",
             head: "HEAD~5",
             title: "Leetcode Journey Begins",
-            desc: format!("Registered on Leetcode. Solved {} problems.",lcapi(&HTTP_CLIENT).await.unwrap_or(0)),
+            desc: format!("Registered on Leetcode. Solved 192 problems."),
         },
         TimelineItem {
             date: "Oct 2024",
             head: "HEAD~4",
             title: "Codeforces Journey Begins",
-            desc: format!("Current rating {}. Max rating {}.",cr,mr),
+            desc: "Current rating 192. Max rating 192.".to_string(),
         },
         TimelineItem {
             date: "Nov 2025",

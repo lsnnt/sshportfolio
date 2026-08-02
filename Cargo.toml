@@ -8,13 +8,11 @@ russh = "0.62.4"
 ratatui = "0.30.2"
 tokio = {version = "1.53.1", features = ["full"]}
 anyhow = "1.0.104"
-rand = "0.10.2"
 ssh-key = "0.7.0-rc.11"
-crossterm = "0.29.0"
 tui-big-text = "0.8.8"
 reqwest = {version = "0.13.4",features = ["json"]}
 serde_json = "1.0.151"
 rss = "2.1.0"
 serde = { version = "1.0.229", features = ["derive"] }
-moka = { version = "0.12", features = ["future", "sync"] }
-once_cell = "1"
+rand = "0.10.2"
+textwrap = "0.16"

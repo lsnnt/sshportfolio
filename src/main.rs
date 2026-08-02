@@ -20,6 +20,7 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::{Mutex, RwLock};
 use tokio::try_join;
+use ssh_key::Algorithm::Ed25519;
 
 /// Which section of the site a client is currently viewing.
 ///
@@ -44,19 +45,40 @@ pub enum Page {
 pub struct ClientState<B: Backend> {
     pub terminal: Terminal<B>,
     pub page: Page,
+    pub blog_scroll: u16,
+    pub project_scroll: u16,
 }
 
 /// Call this from your existing key-byte handler for a connection.
 pub fn handle_key<B: Backend>(state: &mut ClientState<B>, key: char) {
-    state.page = match key {
-        'a' | 'A' => Page::About,
-        't' | 'T' => Page::Timeline,
-        'P' | 'p' => Page::Projects,
-        'b' | 'B' => Page::Blog,
-        'c' | 'C' => Page::Contact,
-        'h' | 'H' => Page::Home, // back to the hero landing screen
-        _ => return, // unrecognized key, leave the page as-is
-    };
+    match key {
+        'a' | 'A' => state.page = Page::About,
+        't' | 'T' => state.page = Page::Timeline,
+        'p' | 'P' => state.page = Page::Projects,
+        'b' | 'B' => state.page = Page::Blog,
+        'c' | 'C' => state.page = Page::Contact,
+        'h' | 'H' => state.page = Page::Home,
+
+        'j' => match state.page {
+            Page::Projects => state.project_scroll += 1,
+            Page::Blog => state.blog_scroll += 1,
+            _ => {}
+        },
+
+        'k' => match state.page {
+            Page::Projects => {
+                state.project_scroll =
+                    state.project_scroll.saturating_sub(1);
+            }
+            Page::Blog => {
+                state.blog_scroll =
+                    state.blog_scroll.saturating_sub(1);
+            }
+            _ => {}
+        },
+
+        _ => {}
+    }
 }
 
 /// This is your posted loop, filled in — redraw every connected client
@@ -161,13 +183,13 @@ impl AppServer {
             auth_rejection_time: std::time::Duration::from_secs(3),
             auth_rejection_time_initial: Some(std::time::Duration::from_secs(0)),
             keys: vec![
-                russh::keys::PrivateKey::random(&mut rand::rng(), ssh_key::Algorithm::Ed25519)?,
+                russh::keys::PrivateKey::random(&mut rand::rng(), Ed25519)?,
             ],
             nodelay: true,
             ..Default::default()
         };
 
-        self.run_on_address(Arc::new(config), ("0.0.0.0", 22))
+        self.run_on_address(Arc::new(config), ("0.0.0.0", 2222))
             .await?;
         Ok(())
     }
@@ -214,6 +236,8 @@ impl Handler for AppServer {
             ClientState {
                 terminal,
                 page: Page::Home,
+                blog_scroll: 0,
+                project_scroll: 0,
             },
         );
         reply.accept().await;
@@ -240,9 +264,11 @@ impl Handler for AppServer {
 
                     // Optional: redraw immediately
                     let page = client.page;
+                    let blog_scroll = client.blog_scroll;
+                    let project_scroll = client.project_scroll;
                     let state = state.read().await;
                     let _ = client.terminal.draw(|frame| {
-                        draw_ui(frame, page, &state);
+                        draw_ui(frame, page, &state, blog_scroll, project_scroll);
                     });
                 }
             }

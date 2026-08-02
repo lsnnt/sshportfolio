@@ -3,7 +3,8 @@ use ratatui::backend::Backend;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, Line, Modifier, Span, Style};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
+use textwrap::{wrap, Options};
 use tui_big_text::{BigText, PixelSize};
 use crate::{AppState, ClientState, Page, TimelineItem};
 
@@ -101,14 +102,14 @@ pub fn draw_skill_column(frame: &mut Frame, area: Rect, label: &str, items: &[&s
 }
 
 
-pub fn draw_projects(frame: &mut Frame, area: Rect, state: &AppState) {
+pub fn draw_projects(frame: &mut Frame, area: Rect, state: &AppState, projsc : u16) {
     let block = Block::default()
         .title("Projects")
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::DarkGray));
 
     let inner = block.inner(area);
-    frame.render_widget(block, area);
+   
 
     let mut lines = Vec::new();
 
@@ -126,14 +127,20 @@ pub fn draw_projects(frame: &mut Frame, area: Rect, state: &AppState) {
     } else {
         for repo in &state.repos {
             lines.push(Line::from(vec![
-                Span::styled("▶ ", Style::new().fg(Color::Yellow)),
+                Span::styled("  ▶ ", Style::new().fg(Color::Yellow)),
                 Span::styled(&repo.name, Style::new().fg(Color::Cyan).bold()),
             ]));
+            let desc_width = inner.width.saturating_sub(4) as usize;
+            let options = Options::new(desc_width)
+                .initial_indent("  ")
+                .subsequent_indent("  ");
 
-            lines.push(Line::from(Span::styled(
-                format!("  {}", repo.description),
-                Style::new().fg(Color::White),
-            )));
+            for line in wrap(&repo.description, options) {
+                lines.push(Line::from(Span::styled(
+                    line.to_string(),
+                    Style::new().fg(Color::White),
+                )));
+            }
 
             lines.push(Line::from(vec![
                 Span::styled(
@@ -150,19 +157,38 @@ pub fn draw_projects(frame: &mut Frame, area: Rect, state: &AppState) {
             lines.push(Line::default());
         }
     }
+    let total_lines = lines.len();
+    let max_scroll = total_lines.saturating_sub(inner.height as usize);
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    let scroll = projsc.min(max_scroll as u16);
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((scroll, 0))
+        .wrap(ratatui::widgets::Wrap { trim: false });
+    frame.render_widget(paragraph, area);
+
+    let mut scrollbar_state = ScrollbarState::new(total_lines)
+        .position(scroll as usize);
+
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight),
+        inner,
+        &mut scrollbar_state,
+    );
 }
 pub fn redraw_all<B: Backend>(clients: &mut HashMap<usize, ClientState<B>>, state: &AppState) {
     for (_, client) in clients.iter_mut() {
         let page = client.page;
+        let blog_scro = client.blog_scroll;
+        let projsc = client.project_scroll;
         let _ = client.terminal.draw(|frame| {
-            draw_ui(frame, page,&state);
+            draw_ui(frame, page, &state, blog_scro, projsc);
         });
     }
 }
 
-pub fn draw_ui(frame: &mut Frame, page: Page, state : &AppState) {
+pub fn draw_ui(frame: &mut Frame, page: Page, state : &AppState, blog_scroll : u16, proj_scroll: u16) {
     let area = frame.area();
 
     let chunks = Layout::default()
@@ -175,7 +201,7 @@ pub fn draw_ui(frame: &mut Frame, page: Page, state : &AppState) {
         .split(area);
 
     draw_nav(frame, chunks[0], page);
-    draw_body(frame, chunks[1], page, state);
+    draw_body(frame, chunks[1], page, state, blog_scroll, proj_scroll);
     draw_footer(frame, chunks[2], page);
 }
 
@@ -217,13 +243,13 @@ pub fn draw_nav(frame: &mut Frame, area: Rect, page: Page) {
 
 // ---------- body ----------
 
-pub fn draw_body(frame: &mut Frame, area: Rect, page: Page, state : &AppState) {
+pub fn draw_body(frame: &mut Frame, area: Rect, page: Page, state : &AppState, blog_scroll : u16, proj_scroll: u16) {
     match page {
         Page::Home => draw_home(frame, area),
         Page::About => draw_about(frame, area),
-        Page::Projects => draw_projects(frame, area,state),
+        Page::Projects => draw_projects(frame, area,state,proj_scroll),
         Page::Timeline => draw_timeline(frame, area,state),
-        Page::Blog => draw_blogs(frame, area,state),
+        Page::Blog => draw_blogs(frame, area,state,blog_scroll),
         Page::Contact => draw_contact(frame, area),
     }
 }
@@ -388,7 +414,7 @@ pub fn draw_contact(frame: &mut Frame, area: Rect) {
         );
     }
 }
-pub fn draw_blogs(frame: &mut Frame, area: Rect, state: &AppState) {
+pub fn draw_blogs(frame: &mut Frame, area: Rect, state: &AppState, blogsc : u16) {
     let block = Block::default()
         .title("Blogs")
         .borders(Borders::ALL)
@@ -435,8 +461,24 @@ pub fn draw_blogs(frame: &mut Frame, area: Rect, state: &AppState) {
             lines.push(Line::default());
         }
     }
+    let total_lines = lines.len();
+    let max_scroll = total_lines.saturating_sub(inner.height as usize);
 
-    frame.render_widget(Paragraph::new(lines), inner);
+    let scroll = blogsc.min(max_scroll as u16);
+
+    let paragraph = Paragraph::new(lines)
+        .scroll((scroll, 0));
+
+    frame.render_widget(paragraph, inner);
+
+    let mut scrollbar_state = ScrollbarState::new(total_lines)
+        .position(scroll as usize);
+
+    frame.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight),
+        inner,
+        &mut scrollbar_state,
+    );
 }
 pub fn draw_home(frame: &mut Frame, area: Rect) {
     let card = Block::default()

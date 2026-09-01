@@ -561,6 +561,10 @@ fn draw_footer(frame: &mut Frame, area: Rect, page: Page) {
         hint("blog", 'b', page == Page::Blog),
         Span::raw(" "),
         hint("contact", 'c', page == Page::Contact),
+        Span::raw(" "),
+        hint("down",'j', false),
+        Span::raw(" "),
+        hint("up",'k', false),
     ]);
 
     let footer = Paragraph::new(line)

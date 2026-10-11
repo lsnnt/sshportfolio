@@ -1,8 +1,11 @@
-use serde::{Deserialize};
+//! GitHub GraphQL models.
+
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct GithubResponse {
-    pub data: Data,
+    /// `null` when the query fails (bad token, rate limit, ...).
+    pub data: Option<Data>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -18,15 +21,19 @@ pub struct User {
 
 #[derive(Debug, Deserialize)]
 pub struct PinnedItems {
+    #[serde(default)]
     pub nodes: Vec<Repo>,
 }
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Language {
     pub name: String,
 }
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Repo {
     pub name: String,
+    /// Repositories without a description have `description: null`.
     #[serde(default)]
     pub description: String,
     #[serde(rename = "stargazerCount")]

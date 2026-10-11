@@ -1,6 +1,9 @@
-
 pub mod getpinnedrepo;
-pub mod rating;
+pub mod input;
 pub mod lcapi;
+pub mod markdown;
 pub mod mblog;
+pub mod rating;
+pub mod theme;
 pub mod tuis;
+pub mod view;

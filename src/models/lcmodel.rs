@@ -1,16 +1,19 @@
+//! LeetCode GraphQL models.
+
 use serde::Deserialize;
 
-//{"data":{"matchedUser":{"submitStats":{"acSubmissionNum":[{"difficulty":"All","count":186},{"difficulty":"Easy","count":105},{"difficulty":"Medium","count":76},{"difficulty":"Hard","count":5}]}}}}
+// {"data":{"matchedUser":{"submitStats":{"acSubmissionNum":[{"difficulty":"All","count":186},{"difficulty":"Easy","count":105},{"difficulty":"Medium","count":76},{"difficulty":"Hard","count":5}]}}}}
 
 #[derive(Debug, Deserialize)]
 pub struct LCResponse {
-    pub data: Data,
+    pub data: Option<Data>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Data {
+    /// `null` when the handle does not exist.
     #[serde(rename = "matchedUser")]
-    pub matched_user: MatchedUser,
+    pub matched_user: Option<MatchedUser>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -21,12 +24,13 @@ pub struct MatchedUser {
 
 #[derive(Debug, Deserialize)]
 pub struct SubmitStats {
-    #[serde(rename = "acSubmissionNum")]
+    #[serde(rename = "acSubmissionNum", default)]
     pub ac_submission_num: Vec<SubmissionStat>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SubmissionStat {
     pub difficulty: String,
-    pub count: u32,
+    #[serde(default)]
+    pub count: Option<u32>,
 }
